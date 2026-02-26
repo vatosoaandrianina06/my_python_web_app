@@ -3,6 +3,7 @@ name: Build, Push and Deploy to Local VM (Self-Hosted Runner)
 on:
   push:
     branches: [main]
+  # workflow_dispatch:
 
 jobs:
   build-push-deploy:
@@ -12,87 +13,76 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: List files (debug)
-        run: dir
-        shell: cmd
-
+      # 1️ - Build Docker image
       - name: Build Docker image
         run: |
-          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/mon-site-flask:latest .
-          docker tag ${{ secrets.DOCKERHUB_USERNAME }}/mon-site-flask:latest ${{ secrets.DOCKERHUB_USERNAME }}/mon-site-flask:${{ github.sha }}
+          docker build \
+            -t ${{ secrets.DOCKERHUB_USERNAME }}/mon-site-flask:latest \
+            -t ${{ secrets.DOCKERHUB_USERNAME }}/mon-site-flask:${{ github.sha }} .
 
+      # 2️ - Login Docker Hub
       - name: Login to Docker Hub
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      # 3 - Push Docker image
       - name: Push Docker image
         run: |
           docker push ${{ secrets.DOCKERHUB_USERNAME }}/mon-site-flask:latest
           docker push ${{ secrets.DOCKERHUB_USERNAME }}/mon-site-flask:${{ github.sha }}
 
-      - name: Deploy locally on Windows
+      # 4- Deploy locally on the VM (NO SSH)
+      - name: Deploy locally on VM
         run: |
-          Write-Host "Début du déploiement local..."
-          
-          $DOCKERHUB_USERNAME = "${{ secrets.DOCKERHUB_USERNAME }}"
-          $IMAGE_NAME = "mon-site-flask"
-          $TAG = "latest"
-          $FULL_IMAGE = "${DOCKERHUB_USERNAME}/${IMAGE_NAME}:${TAG}"
-          $CONTAINER_NAME = "flask-app"
-          
-          Write-Host "Image à déployer: $FULL_IMAGE"
-          
-          # Pull latest image
+          echo "Début du déploiement local..."
+
+          DOCKERHUB_USERNAME="${{ secrets.DOCKERHUB_USERNAME }}"
+          IMAGE_NAME="mon-site-flask"
+          TAG="latest"
+          FULL_IMAGE="$DOCKERHUB_USERNAME/$IMAGE_NAME:$TAG"
+          CONTAINER_NAME="flask-app"
+          NETWORK_NAME="flask-network"
+
+          log_info() { echo "[INFO] $1"; }
+          log_error() { echo "[ERROR] $1"; }
+          log_success() { echo "[SUCCESS] $1"; }
+
+          mkdir -p /opt/flask-app
+
+          log_info "Pull de la dernière image..."
           docker pull $FULL_IMAGE
-          
-          # Vérifier si le conteneur existe et le supprimer proprement
-          Write-Host "Nettoyage de l'ancien conteneur..."
-          $EXISTING_CONTAINER = docker ps -a --filter "name=$CONTAINER_NAME" --format "{{.Names}}"
-          
-          if ($EXISTING_CONTAINER -eq $CONTAINER_NAME) {
-              Write-Host "Conteneur existant trouvé, arrêt et suppression..."
-              docker stop $CONTAINER_NAME
-              docker rm $CONTAINER_NAME
-              Write-Host "Ancien conteneur supprimé"
-          } else {
-              Write-Host "Aucun conteneur existant trouvé"
-          }
-          
-          # Run new container
-          Write-Host "Démarrage du nouveau conteneur..."
-          $RESULT = docker run -d `
-            --name $CONTAINER_NAME `
-            --restart unless-stopped `
-            -p 5000:5000 `
-            -e SECRET_KEY="${{ secrets.APP_SECRET_KEY }}" `
-            -e FLASK_ENV=production `
-            $FULL_IMAGE 2>&1
-          
-          if ($LASTEXITCODE -ne 0) {
-              Write-Host "❌ Erreur lors du démarrage du conteneur:"
-              Write-Host $RESULT
-              exit 1
-          }
-          
-          # Check if container is running
-          Start-Sleep -Seconds 5
-          $RUNNING = docker ps --filter "name=$CONTAINER_NAME" --filter "status=running" --format "{{.Names}}"
-          
-          if ($RUNNING -eq $CONTAINER_NAME) {
-              Write-Host "✅ Conteneur démarré avec succès"
-              Write-Host "Application disponible sur http://localhost:5000"
-              
-              # Afficher les logs du conteneur
-              Write-Host "Logs du conteneur :"
-              docker logs $CONTAINER_NAME
-          } else {
-              Write-Host "❌ Échec du démarrage du conteneur"
-              Write-Host "Statut du conteneur:"
-              docker ps -a --filter "name=$CONTAINER_NAME"
-              Write-Host "Logs:"
-              docker logs $CONTAINER_NAME
-              exit 1
-          }
-        shell: powershell
+
+          log_info "Arrêt de l'ancien conteneur (si existant)..."
+          docker stop $CONTAINER_NAME 2>/dev/null || true
+          docker rm $CONTAINER_NAME 2>/dev/null || true
+
+          log_info "Création du réseau Docker (si nécessaire)..."
+          docker network create $NETWORK_NAME 2>/dev/null || true
+
+          log_info "Démarrage du nouveau conteneur..."
+          docker run -d \
+            --name $CONTAINER_NAME \
+            --restart unless-stopped \
+            --network $NETWORK_NAME \
+            -p 5000:5000 \
+            -e SECRET_KEY="${{ secrets.APP_SECRET_KEY }}" \
+            -e FLASK_ENV=production \
+            $FULL_IMAGE
+
+          sleep 5
+
+          if docker ps | grep -q $CONTAINER_NAME; then
+            log_success "Conteneur démarré avec succès"
+          else
+            log_error "Échec du démarrage du conteneur"
+            docker logs $CONTAINER_NAME
+            exit 1
+          fi
+
+          log_info "Nettoyage des images inutilisées..."
+          docker image prune -af --filter "until=24h"
+
+          echo "Déployé le $(date) - Commit: ${{ github.sha }}" >> /opt/flask-app/deployment.log
+          log_success "Déploiement terminé avec succès"
