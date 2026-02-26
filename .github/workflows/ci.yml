@@ -13,18 +13,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      # ✅ OBLIGATOIRE pour docker build moderne
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      # 1 - Build Docker image
+      # 1️ - Build Docker image
       - name: Build Docker image
         run: |
           docker build \
             -t ${{ secrets.DOCKERHUB_USERNAME }}/mon-site-flask:latest \
             -t ${{ secrets.DOCKERHUB_USERNAME }}/mon-site-flask:${{ github.sha }} .
 
-      # 2 - Login Docker Hub
+      # 2️ - Login Docker Hub
       - name: Login to Docker Hub
         uses: docker/login-action@v2
         with:
@@ -37,10 +33,10 @@ jobs:
           docker push ${{ secrets.DOCKERHUB_USERNAME }}/mon-site-flask:latest
           docker push ${{ secrets.DOCKERHUB_USERNAME }}/mon-site-flask:${{ github.sha }}
 
-      # 4 - Deploy locally on the VM (NO SSH)
+      # 4- Deploy locally on the VM (NO SSH)
       - name: Deploy locally on VM
         run: |
-          echo "🚀 Début du déploiement local..."
+          echo "Début du déploiement local..."
 
           DOCKERHUB_USERNAME="${{ secrets.DOCKERHUB_USERNAME }}"
           IMAGE_NAME="mon-site-flask"
