@@ -26,7 +26,7 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-
+                        
       # 3 - Push Docker image
       - name: Push Docker image
         run: |
@@ -49,7 +49,7 @@ jobs:
           log_error() { echo "[ERROR] $1"; }
           log_success() { echo "[SUCCESS] $1"; }
 
-          mkdir -p /opt/flask-app
+          mkdir -p ~/flask-app
 
           log_info "Pull de la dernière image..."
           docker pull $FULL_IMAGE
@@ -84,5 +84,5 @@ jobs:
           log_info "Nettoyage des images inutilisées..."
           docker image prune -af --filter "until=24h"
 
-          echo "Déployé le $(date) - Commit: ${{ github.sha }}" >> /opt/flask-app/deployment.log
+          echo "Déployé le $(date) - Commit: ${{ github.sha }}" >> ~/flask-app/deployment.log
           log_success "Déploiement terminé avec succès"
